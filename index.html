@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL: Процедурный Игровой Движок</title>
+    <style>
+        /* ── Сброс и базовые стили ─────────────────────────────────────────── */
+        body   { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        canvas { display: block; }
+
+        /* ── Общие переменные панелей ──────────────────────────────────────── */
+        :root {
+            --panel-bg:      rgba(15, 15, 15, 0.95);
+            --panel-border:  #333;
+            --panel-shadow:  0 4px 15px rgba(0,0,0,0.8);
+            --accent-blue:   #4488ff;
+            --accent-green:  #44ff88;
+            --accent-yellow: #ffff00;
+            --accent-orange: #ffaa00;
+            --accent-red:    #ff4444;
+            --text-muted:    #aaa;
+            --text-dim:      #666;
+            --font-mono:     monospace;
+        }
+
+        /* ── Левая панель управления ───────────────────────────────────────── */
+        #ui-panel {
+            position: absolute; top: 10px; left: 10px;
+            background: var(--panel-bg); color: #fff;
+            padding: 15px; border-radius: 8px;
+            border: 1px solid var(--panel-border);
+            z-index: 10; width: 340px; max-height: 95vh; overflow-y: auto;
+            box-shadow: var(--panel-shadow); font-size: 12px;
+        }
+        #ui-panel::-webkit-scrollbar       { width: 6px; }
+        #ui-panel::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+        /* ── Правая панель телеметрии ──────────────────────────────────────── */
+        #ui-panel-right {
+            position: absolute; top: 10px; right: 10px;
+            background: var(--panel-bg); color: #fff;
+            padding: 15px; border-radius: 8px;
+            border: 1px solid #a22;
+            z-index: 10; width: 200px;
+            box-shadow: var(--panel-shadow); font-size: 12px;
+            display: none;
+        }
+
+        /* ── Координатная плашка ───────────────────────────────────────────── */
+        #coord-panel {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            padding: 8px 24px; border-radius: 6px;
+            font-family: var(--font-mono); font-size: 14px; font-weight: bold; text-align: center;
+            display: none; z-index: 100; pointer-events: none;
+            border: 2px solid rgba(255,255,255,0.2);
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        }
+        .coord-panel--planet { background: rgba(10,40,80,0.85);  color: #fff;    border-color: var(--accent-blue); }
+        .coord-panel--moon   { background: rgba(64,64,64,0.85);  color: #fff;    border-color: #aaa; }
+        .coord-panel--sun    { background: rgba(80,60,0,0.85);   color: #ffea00; border-color: var(--accent-orange); }
+
+        /* ── Консоль ───────────────────────────────────────────────────────── */
+        #console-panel {
+            position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+            width: 600px; background: rgba(15,15,15,0.90);
+            border: 1px solid #444; border-radius: 8px;
+            display: flex; flex-direction: column;
+            font-family: var(--font-mono); font-size: 12px;
+            z-index: 100; box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+        }
+        #console-output {
+            max-height: 150px; overflow-y: auto;
+            padding: 10px; color: #ccc;
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        #console-output::-webkit-scrollbar       { width: 6px; }
+        #console-output::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+        .log-entry  { margin: 0; word-wrap: break-word; }
+        .log-user   { color: #aaa; font-weight: bold; }
+        .log-sys    { color: var(--accent-green); }
+        .log-warn   { color: var(--accent-orange); }
+        .log-err    { color: var(--accent-red); }
+        #console-input-wrapper {
+            display: flex; border-top: 1px solid #333; padding: 6px 10px;
+            align-items: center; background: rgba(0,0,0,0.3);
+            border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
+        }
+        #console-prompt { color: var(--accent-blue); margin-right: 8px; font-weight: bold; }
+        #console-input  {
+            background: transparent; border: none; color: #fff;
+            width: 100%; outline: none;
+            font-family: var(--font-mono); font-size: 13px;
+        }
+
+        /* ── Индикатор загрузки ────────────────────────────────────────────── */
+        #loading-indicator {
+            position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); color: #fff;
+            padding: 8px 16px; border-radius: 8px;
+            font-family: var(--font-mono); z-index: 200; font-size: 12px;
+            border: 1px solid var(--accent-blue);
+            display: none;
+        }
+
+        /* ── Секции, заголовки, группы ─────────────────────────────────────── */
+        .ui-section { border-bottom: 1px solid var(--panel-border); padding-bottom: 10px; margin-bottom: 10px; }
+        .ui-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        h4 { margin: 0 0 8px 0; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+        .ui-group { margin-bottom: 8px; }
+        label { display: block; color: var(--text-muted); margin-bottom: 4px; font-size: 11px; }
+
+        /* ── Заголовки секций (цвет по теме) ───────────────────────────────── */
+        .h4--gen    { color: var(--accent-green); }
+        .h4--light  { color: var(--accent-yellow); }
+        .h4--optics { color: var(--accent-orange); }
+        .h4--camera { color: #fff; }
+        .h4--telem  { color: var(--accent-red); }
+
+        /* ── Инпуты ────────────────────────────────────────────────────────── */
+        input[type="text"],
+        input[type="number"] {
+            width: 100%; background: #111; border: 1px solid #444; color: #fff;
+            padding: 6px; border-radius: 4px; box-sizing: border-box;
+            font-family: var(--font-mono);
+        }
+        input[type="range"]    { width: 100%; cursor: pointer; accent-color: var(--accent-blue); }
+        #file-input            { display: none; }
+
+        /* ── Чекбоксы ──────────────────────────────────────────────────────── */
+        .checkbox-group { display: flex; gap: 15px; margin-bottom: 10px; flex-wrap: wrap; }
+        .checkbox-label { display: flex; align-items: center; cursor: pointer; color: #fff; font-weight: bold; font-size: 11px; }
+        .checkbox-label input { margin-right: 6px; accent-color: var(--accent-blue); }
+
+        /* ── Кнопки ────────────────────────────────────────────────────────── */
+        .btn-group { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; }
+        button {
+            flex: 1; min-width: 45px;
+            background: #222; border: 1px solid #444; color: #ccc;
+            padding: 6px 0; cursor: pointer; border-radius: 4px;
+            font-size: 11px; text-align: center; transition: background 0.2s;
+        }
+        button:hover:not(.active):not(.btn--action):not(.btn--save):not(.btn--generate):not(.btn--load) { background: #333; }
+        button.active          { background: var(--accent-blue);  border-color: var(--accent-blue); color: #fff; font-weight: bold; }
+        button.btn--action     { background: #338833; border-color: #44aa44; color: #fff; font-weight: bold; }
+        button.btn--action:hover { background: #44aa44; }
+        button.btn--generate   { background: #8844ff; border-color: #8844ff; color: #fff; font-weight: bold; }
+        button.btn--generate:hover { background: #9955ff; }
+        button.btn--save       { background: #2a5298; border-color: #2a5298; color: #fff; font-weight: bold; }
+        button.btn--save:hover { background: #3363aa; }
+        button.btn--load       { background: #d45d00; border-color: #d45d00; color: #fff; font-weight: bold; }
+        button.btn--load:hover { background: #e06a00; }
+        button.btn--player     { background: #a22;    border-color: #f44;    color: #fff; }
+        button.btn--player:hover { background: #c33; }
+
+        /* ── Вспомогательные ───────────────────────────────────────────────── */
+        .time-grid    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+        .flex-label   { display: flex; justify-content: space-between; }
+        .val-display  { color: var(--accent-blue); font-family: var(--font-mono); }
+        .hud-panel    { background: rgba(0,0,0,0.5); padding: 8px; border-radius: 4px; border: 1px solid #444; }
+        .val--fps     { color: #0f0; font-weight: bold; }
+        .val--tris    { color: var(--accent-orange); }
+        .val--telem   { color: var(--text-muted); }
+        .divider      { border-top: 1px solid #444; margin: 8px 0; }
+        .hint-text    { color: var(--text-dim); font-size: 10px; text-align: center; margin-top: 5px; }
+        .coord-title  { font-size: 10px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px; }
+
+        /* Модификаторы, заменяющие инлайн-стили */
+        .btn-group--mb   { margin-bottom: 8px; }
+        .ui-section--last { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    </style>
+</head>
+<body>
+
+    <!-- Координатная плашка (центр-верх) -->
+    <div id="coord-panel">
+        <div id="coord-title" class="coord-title"></div>
+        <div>LAT: <span id="coord-lat">0.00</span>° | LON: <span id="coord-lon">0.00</span>°</div>
+    </div>
+
+    <!-- Индикатор генерации -->
+    <div id="loading-indicator"></div>
+
+    <!-- Консоль (центр-низ) -->
+    <div id="console-panel">
+        <div id="console-output"></div>
+        <div id="console-input-wrapper">
+            <span id="console-prompt">&gt;</span>
+            <input type="text" id="console-input" autocomplete="off" spellcheck="false"
+                   placeholder="Введите команду (например, /help)">
+        </div>
+    </div>
+
+    <!-- Левая панель -->
+    <div id="ui-panel">
+
+        <!-- HUD: FPS и треугольники -->
+        <div class="ui-section hud-panel">
+            <div class="flex-label"><label>FPS:</label><span id="hud-fps" class="val-display val--fps">0</span></div>
+            <div class="flex-label"><label>Треугольники:</label><span id="hud-tris" class="val-display val--tris">0</span></div>
+        </div>
+
+        <!-- Генерация -->
+        <div class="ui-section">
+            <h4 class="h4--gen">Генерация миров</h4>
+            <div class="ui-group">
+                <label>Seed (Семя генерации)</label>
+                <input type="number" id="seed-input" value="123456">
+            </div>
+            <div class="ui-group"><div class="flex-label"><label>Уровень океана</label><span id="val-gen-water" class="val-display">40%</span></div><input type="range" id="gen-water" min="0.1" max="0.8" step="0.05" value="0.4"></div>
+            <div class="ui-group"><div class="flex-label"><label>Континенты</label><span id="val-gen-cont" class="val-display">2.5</span></div><input type="range" id="gen-cont" min="1.0" max="6.0" step="0.1" value="2.5"></div>
+            <div class="ui-group"><div class="flex-label"><label>Острова</label><span id="val-gen-isl" class="val-display">0.25</span></div><input type="range" id="gen-isl" min="0.0" max="0.6" step="0.05" value="0.25"></div>
+            <div class="ui-group"><div class="flex-label"><label>Разброс высот</label><span id="val-gen-elev" class="val-display">1.0</span></div><input type="range" id="gen-elev" min="0.1" max="3.0" step="0.1" value="1.0"></div>
+            <div class="ui-group"><div class="flex-label"><label>Теплота климата</label><span id="val-gen-temp" class="val-display">0.0</span></div><input type="range" id="gen-temp" min="-0.5" max="0.5" step="0.05" value="0.0"></div>
+            <div class="ui-group"><div class="flex-label"><label>Влажность</label><span id="val-gen-moist" class="val-display">0.0</span></div><input type="range" id="gen-moist" min="-0.5" max="0.5" step="0.05" value="0.0"></div>
+
+            <div class="divider"></div>
+
+            <div class="ui-group"><div class="flex-label"><label>Кучевые облака</label><span id="val-gen-c-std" class="val-display">50%</span></div><input type="range" id="gen-c-std" min="0" max="1" step="0.05" value="0.5"></div>
+            <div class="ui-group"><div class="flex-label"><label>Грозовые тучи</label><span id="val-gen-c-rain" class="val-display">30%</span></div><input type="range" id="gen-c-rain" min="0" max="1" step="0.05" value="0.3"></div>
+            <div class="ui-group"><div class="flex-label"><label>Перистые облака</label><span id="val-gen-c-cirrus" class="val-display">40%</span></div><input type="range" id="gen-c-cirrus" min="0" max="1" step="0.05" value="0.4"></div>
+
+            <div class="btn-group">
+                <button id="btn-randomize" class="btn--action">Случайный Seed</button>
+                <button id="btn-generate"  class="btn--generate">Сгенерировать</button>
+            </div>
+            <div class="btn-group">
+                <button id="btn-save"   class="btn--save">Быстрое сохранение</button>
+                <button id="btn-load"   class="btn--load">Быстрая загрузка</button>
+            </div>
+            <div class="btn-group">
+                <button id="btn-export">Сохранить JSON</button>
+                <button id="btn-import">Загрузить JSON</button>
+            </div>
+            <input type="file" id="file-input" accept=".json">
+        </div>
+
+        <!-- Освещение -->
+        <div class="ui-section">
+            <h4 class="h4--light">Освещение (День/Ночь)</h4>
+            <div class="ui-group"><div class="flex-label"><label>Яркость Солнца (День)</label><span id="val-light-sun" class="val-display">5.0</span></div><input type="range" id="light-sun" min="1.0" max="15.0" step="0.5" value="5.0"></div>
+            <div class="ui-group"><div class="flex-label"><label>Фоновый свет (Ночь)</label><span id="val-light-amb" class="val-display">0.02</span></div><input type="range" id="light-amb" min="0.0" max="0.2" step="0.01" value="0.02"></div>
+        </div>
+
+        <!-- Оптика -->
+        <div class="ui-section">
+            <h4 class="h4--optics">Оптика и Атмосфера</h4>
+            <div class="checkbox-group">
+                <label class="checkbox-label"><input type="checkbox" id="show-solid" checked> Solid</label>
+                <label class="checkbox-label"><input type="checkbox" id="show-wire"  checked> Wireframe</label>
+                <label class="checkbox-label"><input type="checkbox" id="show-atmos" checked> Атмосфера</label>
+            </div>
+            <div class="ui-group"><div class="flex-label"><label>Толщина атмосферы</label><span id="val-atmos-scale" class="val-display">1.15</span></div><input type="range" id="atmos-scale" min="1.08" max="1.4" step="0.01" value="1.15"></div>
+            <div class="ui-group"><div class="flex-label"><label>Плотность (Яркость)</label><span id="val-atmos-int" class="val-display">0.5</span></div><input type="range" id="atmos-int" min="0.1" max="3" step="0.1" value="0.5"></div>
+            <div class="ui-group"><div class="flex-label"><label>Bloom Интенсивность</label><span id="val-bloom-strength" class="val-display">1.0</span></div><input type="range" id="bloom-strength" min="0" max="5" step="0.1" value="1.0"></div>
+            <div class="ui-group"><div class="flex-label"><label>Bloom Порог</label><span id="val-bloom-threshold" class="val-display">1.0</span></div><input type="range" id="bloom-threshold" min="0" max="2" step="0.1" value="1.0"></div>
+        </div>
+
+        <!-- Камера и время -->
+        <div class="ui-section">
+            <h4 class="h4--camera">Камера и Время</h4>
+            <div class="btn-group btn-group--mb">
+                <button id="focus-free"   class="active">Свободный</button>
+                <button id="focus-player" class="btn--player">Игрок</button>
+                <button id="focus-sun">Солнце</button>
+                <button id="focus-planet">Планета</button>
+                <button id="focus-moon">Луна</button>
+            </div>
+            <div class="time-grid" id="time-controls"></div>
+        </div>
+
+    </div>
+
+    <!-- Правая панель: телеметрия игрока -->
+    <div id="ui-panel-right">
+        <div class="ui-section">
+            <h4 class="h4--telem">Телеметрия Костюма</h4>
+            <div class="flex-label"><label>Широта:</label><span  id="hud-lat" class="val-display val--telem">0.00°</span></div>
+            <div class="flex-label"><label>Долгота:</label><span id="hud-lon" class="val-display val--telem">0.00°</span></div>
+            <div class="flex-label"><label>Высота:</label><span  id="hud-alt" class="val-display val--telem">0 м</span></div>
+        </div>
+        <div class="ui-section ui-section--last">
+            <p class="hint-text">УПРАВЛЕНИЕ: W, A, S, D<br>ПРАВЫЙ КЛИК: Координаты тайла</p>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three":          "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/":  "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
