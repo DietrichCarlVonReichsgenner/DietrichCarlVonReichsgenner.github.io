@@ -171,16 +171,13 @@
 </head>
 <body>
 
-    <!-- Координатная плашка (центр-верх) -->
     <div id="coord-panel">
         <div id="coord-title" class="coord-title"></div>
         <div>LAT: <span id="coord-lat">0.00</span>° | LON: <span id="coord-lon">0.00</span>°</div>
     </div>
 
-    <!-- Индикатор генерации -->
     <div id="loading-indicator"></div>
 
-    <!-- Консоль (центр-низ) -->
     <div id="console-panel">
         <div id="console-output"></div>
         <div id="console-input-wrapper">
@@ -190,16 +187,13 @@
         </div>
     </div>
 
-    <!-- Левая панель -->
     <div id="ui-panel">
 
-        <!-- HUD: FPS и треугольники -->
         <div class="ui-section hud-panel">
             <div class="flex-label"><label>FPS:</label><span id="hud-fps" class="val-display val--fps">0</span></div>
             <div class="flex-label"><label>Треугольники:</label><span id="hud-tris" class="val-display val--tris">0</span></div>
         </div>
 
-        <!-- Генерация -->
         <div class="ui-section">
             <h4 class="h4--gen">Генерация миров</h4>
             <div class="ui-group">
@@ -212,6 +206,7 @@
             <div class="ui-group"><div class="flex-label"><label>Разброс высот</label><span id="val-gen-elev" class="val-display">1.0</span></div><input type="range" id="gen-elev" min="0.1" max="3.0" step="0.1" value="1.0"></div>
             <div class="ui-group"><div class="flex-label"><label>Теплота климата</label><span id="val-gen-temp" class="val-display">0.0</span></div><input type="range" id="gen-temp" min="-0.5" max="0.5" step="0.05" value="0.0"></div>
             <div class="ui-group"><div class="flex-label"><label>Влажность</label><span id="val-gen-moist" class="val-display">0.0</span></div><input type="range" id="gen-moist" min="-0.5" max="0.5" step="0.05" value="0.0"></div>
+            <div class="ui-group"><div class="flex-label"><label>Количество рек</label><span id="val-gen-river" class="val-display">40</span></div><input type="range" id="gen-river" min="0" max="100" step="1" value="40"></div>
 
             <div class="divider"></div>
 
@@ -234,14 +229,12 @@
             <input type="file" id="file-input" accept=".json">
         </div>
 
-        <!-- Освещение -->
         <div class="ui-section">
             <h4 class="h4--light">Освещение (День/Ночь)</h4>
             <div class="ui-group"><div class="flex-label"><label>Яркость Солнца (День)</label><span id="val-light-sun" class="val-display">5.0</span></div><input type="range" id="light-sun" min="1.0" max="15.0" step="0.5" value="5.0"></div>
             <div class="ui-group"><div class="flex-label"><label>Фоновый свет (Ночь)</label><span id="val-light-amb" class="val-display">0.02</span></div><input type="range" id="light-amb" min="0.0" max="0.2" step="0.01" value="0.02"></div>
         </div>
 
-        <!-- Оптика -->
         <div class="ui-section">
             <h4 class="h4--optics">Оптика и Атмосфера</h4>
             <div class="checkbox-group">
@@ -255,7 +248,6 @@
             <div class="ui-group"><div class="flex-label"><label>Bloom Порог</label><span id="val-bloom-threshold" class="val-display">1.0</span></div><input type="range" id="bloom-threshold" min="0" max="2" step="0.1" value="1.0"></div>
         </div>
 
-        <!-- Камера и время -->
         <div class="ui-section">
             <h4 class="h4--camera">Камера и Время</h4>
             <div class="btn-group btn-group--mb">
@@ -270,7 +262,6 @@
 
     </div>
 
-    <!-- Правая панель: телеметрия игрока -->
     <div id="ui-panel-right">
         <div class="ui-section">
             <h4 class="h4--telem">Телеметрия Костюма</h4>
