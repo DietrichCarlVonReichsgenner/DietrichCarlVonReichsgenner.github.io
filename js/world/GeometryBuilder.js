@@ -68,6 +68,7 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
     const globTemp = genParams?.globalTemp ?? 0.0;
     const globMoist = genParams?.globalMoisture ?? 0.0;
     const reqCityCount = genParams?.cityCount ?? CONFIG.generation.cityCount;
+    const reqRiverCount = genParams?.riverCount ?? CONFIG.generation.riverCount;
     
     const cloudStdMul = (genParams?.cloudStandard ?? CONFIG.generation.cloudStandard) * 1.5;
     const cloudRainMul = (genParams?.cloudRain ?? CONFIG.generation.cloudRain) * 1.8;
@@ -87,6 +88,8 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
     const cloudFaces = { tropics: { cumulus: [], rain: [], cirrus: [] }, temperate: { cumulus: [], rain: [], cirrus: [] }, polar: { cumulus: [], rain: [], cirrus: [] } };
     const cloudEdgeMaps = { tropics: { cumulus: new Map(), rain: new Map(), cirrus: new Map() }, temperate: { cumulus: new Map(), rain: new Map(), cirrus: new Map() }, polar: { cumulus: new Map(), rain: new Map(), cirrus: new Map() } };
 
+    const landCandidateIndices = [];
+
     const _vA = new THREE.Vector3();
     const _vB = new THREE.Vector3();
     const _vC = new THREE.Vector3();
@@ -94,32 +97,6 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
     const _dir = new THREE.Vector3();
     const _colorObj = new THREE.Color();
     const _lerpColor = new THREE.Color(0x999988);
-
-    const landCandidateIndices = [];
-
-    // Карты графа вершин (для прокладки рек по рёбрам)
-    const vertexMap = new Map();
-    let vCount = 0;
-    const getVIdx = (x, y, z) => {
-        const h = `${x}_${y}_${z}`;
-        let v = vertexMap.get(h);
-        if (!v) {
-            v = { id: vCount++, x, y, z, faces: [] };
-            vertexMap.set(h, v);
-        }
-        return v;
-    };
-
-    const vEdges = new Map();
-    const addVEdge = (u, v, fIdx) => {
-        const key = u < v ? `${u}_${v}` : `${v}_${u}`;
-        let e = vEdges.get(key);
-        if (!e) {
-            e = { u, v, faces: [] };
-            vEdges.set(key, e);
-        }
-        e.faces.push(fIdx);
-    };
 
     for (let i = 0; i < pos.length; i += 9) {
         _vA.set(pos[i], pos[i+1], pos[i+2]);
@@ -171,14 +148,12 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
         
         faceData.push({
             hA, hB, hC,
-            ax: _vA.x, ay: _vA.y, az: _vA.z,
-            bx: _vB.x, by: _vB.y, bz: _vB.z,
-            cx: _vC.x, cy: _vC.y, cz: _vC.z,
+            ax: _vA.x, ay: _vA.y, az: _vA.z, bx: _vB.x, by: _vB.y, bz: _vB.z, cx: _vC.x, cy: _vC.y, cz: _vC.z,
             midX: _center.x, midY: _center.y, midZ: _center.z,
             h, isLandIce, isSeaIce, isSubmerged, temp, moisture, steppedElevation,
             r: _colorObj.r, g: _colorObj.g, b: _colorObj.b,
             sr: _colorObj.r * 0.6, sg: _colorObj.g * 0.6, sb: _colorObj.b * 0.6,
-            isCity: false
+            isCity: false, isSuburb: false
         });
 
         const addEdge = (h1, h2, fIdx, map) => {
@@ -189,19 +164,6 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
         };
         
         addEdge(hA, hB, faceIndex, edgeMap); addEdge(hB, hC, faceIndex, edgeMap); addEdge(hC, hA, faceIndex, edgeMap);
-
-        // Интеграция вершин для рек
-        let vA_node = getVIdx(_vA.x, _vA.y, _vA.z);
-        let vB_node = getVIdx(_vB.x, _vB.y, _vB.z);
-        let vC_node = getVIdx(_vC.x, _vC.y, _vC.z);
-
-        vA_node.faces.push(faceIndex);
-        vB_node.faces.push(faceIndex);
-        vC_node.faces.push(faceIndex);
-
-        addVEdge(vA_node.id, vB_node.id, faceIndex);
-        addVEdge(vB_node.id, vC_node.id, faceIndex);
-        addVEdge(vC_node.id, vA_node.id, faceIndex);
 
         if (CONFIG.generation.clouds.enabled && !isMoon) {
             let noiseVal = noiseC.noise3d(_dir.x * 2.0, _dir.y * 2.0, _dir.z * 2.0) * 0.5 + 0.5;
@@ -278,80 +240,192 @@ function computeTileData(baseGeo, noiseGens, radius, isMoon, genParams) {
                     }
                 }
             }
+            
+            let suburbCandidates = [];
+            for (let c of cluster) {
+                for (let n of adjacency[c]) {
+                    if (!faceData[n].isCity && !faceData[n].isSubmerged && faceData[n].steppedElevation < 0.75) {
+                        suburbCandidates.push(n);
+                    }
+                }
+            }
+            for (let n of suburbCandidates) {
+                if (prng() < 0.6 && !faceData[n].isSuburb) {
+                    faceData[n].isSuburb = true;
+                    faceData[n].r = 0.55; faceData[n].g = 0.55; faceData[n].b = 0.55;
+                }
+            }
+            
             citySeeds.push(seedIdx);
             clustersPlaced++;
         }
-    }
 
-    // ─── Прокладка рек строго по рёбрам (Vertices Graph) ──────────────────────
-    const vertices = Array.from(vertexMap.values());
-    for (let v of vertices) {
-        v.minH = Math.min(...v.faces.map(fIdx => faceData[fIdx].h));
-        v.isSubmerged = v.faces.every(fIdx => faceData[fIdx].isSubmerged);
-    }
-    for (let e of vEdges.values()) {
-        e.h = Math.min(...e.faces.map(fIdx => faceData[fIdx].h));
-    }
-
-    const adj = Array.from({length: vCount}, () => []);
-    for (let e of vEdges.values()) {
-        adj[e.u].push({ v: e.v, edge: e });
-        adj[e.v].push({ v: e.u, edge: e });
+        let numVillages = reqCityCount * 2;
+        for(let i=0; i<numVillages; i++) {
+            let idx = landCandidateIndices[Math.floor(prng() * landCandidateIndices.length)];
+            if(!faceData[idx].isCity && !faceData[idx].isSuburb) {
+                faceData[idx].isSuburb = true;
+                faceData[idx].r = 0.55; faceData[idx].g = 0.55; faceData[idx].b = 0.55;
+            }
+        }
     }
 
     const riverPaths = [];
-    if (!isMoon) {
-        const mountainVerts = vertices.filter(v => !v.isSubmerged && v.minH > 0.55 * maxExtrusion);
-        for (let i = mountainVerts.length - 1; i > 0; i--) {
+    if (!isMoon && reqRiverCount > 0) {
+        const mountainTiles = [];
+        for (let i = 0; i < faceData.length; i++) {
+            if (!faceData[i].isSubmerged && faceData[i].steppedElevation > 0.55) {
+                mountainTiles.push(i);
+            }
+        }
+        
+        for (let i = mountainTiles.length - 1; i > 0; i--) {
             const j = Math.floor(prng() * (i + 1));
-            [mountainVerts[i], mountainVerts[j]] = [mountainVerts[j], mountainVerts[i]];
+            [mountainTiles[i], mountainTiles[j]] = [mountainTiles[j], mountainTiles[i]];
         }
 
-        const visitedVerts = new Set();
-        const riverCount = Math.min(CONFIG.generation.riverCount, mountainVerts.length);
+        const visitedTiles = new Set();
+        const maxRivers = Math.min(reqRiverCount, mountainTiles.length);
 
-        for (let i = 0; i < riverCount; i++) {
-            const startV = mountainVerts[i];
-            if (visitedVerts.has(startV.id)) continue;
-
-            let current = startV.id;
-            const path = [current];
-
-            while (path.length < 1200) {
-                visitedVerts.add(current);
-                const vData = vertices[current];
-                if (vData.isSubmerged) break;
-
-                const neighbors = adj[current];
-                if (!neighbors || neighbors.length === 0) break;
-
-                let best = null;
-                let bestH = Infinity;
-
-                // Река течет в низину по градиенту минимальной высоты смежных тайлов
-                for (const n of neighbors) {
-                    if (n.edge.h < bestH) {
-                        bestH = n.edge.h;
-                        best = n.v;
+        for (let i = 0; i < maxRivers; i++) {
+            let curr = mountainTiles[i];
+            if (visitedTiles.has(curr)) continue;
+            
+            let path = [curr];
+            let reachedSea = false;
+            
+            while (path.length < 300) {
+                visitedTiles.add(curr);
+                
+                let neighbors = adjacency[curr];
+                let bestNeighbor = -1;
+                let minH = faceData[curr].h;
+                
+                for (let n of neighbors) {
+                    if (!visitedTiles.has(n) && faceData[n].h < minH) {
+                        minH = faceData[n].h;
+                        bestNeighbor = n;
+                    }
+                }
+                
+                if (bestNeighbor === -1) {
+                    let equalNeighbors = neighbors.filter(n => !visitedTiles.has(n) && Math.abs(faceData[n].h - faceData[curr].h) < 0.0001);
+                    if (equalNeighbors.length > 0) {
+                        bestNeighbor = equalNeighbors[Math.floor(prng() * equalNeighbors.length)];
                     }
                 }
 
-                if (best === null || visitedVerts.has(best)) {
-                    best = null;
-                    for (const n of neighbors) {
-                        if (!visitedVerts.has(n.v)) { best = n.v; break; }
-                    }
+                if (bestNeighbor === -1) {
+                    break; 
                 }
-
-                if (best === null) break;
-                current = best;
-                path.push(current);
+                
+                curr = bestNeighbor;
+                path.push(curr);
+                
+                if (faceData[curr].isSubmerged) {
+                    reachedSea = true;
+                    break; 
+                }
             }
-            if (path.length > 2) riverPaths.push(path);
+            
+            if (reachedSea && path.length > 2) {
+                riverPaths.push(path);
+            }
         }
     }
 
-    return { faceData, edgeMap, cloudFaces, cloudEdgeMaps, maxExtrusion, riverPaths, vertices, vEdges };
+    const roadPaths = [];
+    if (!isMoon && citySeeds.length > 1) {
+        for (let i = 0; i < citySeeds.length; i++) {
+            let start = citySeeds[i];
+            let targets = [citySeeds[(i + 1) % citySeeds.length]];
+            if (citySeeds.length > 3 && prng() > 0.5) {
+                targets.push(citySeeds[(i + Math.floor(prng()*(citySeeds.length-1)) + 1) % citySeeds.length]);
+            }
+            
+            for (let target of targets) {
+                let q = [start];
+                let cameFrom = new Map();
+                cameFrom.set(start, null);
+                let found = false;
+                while(q.length > 0) {
+                    let curr = q.shift();
+                    if(curr === target) { found = true; break; }
+                    for(let n of adjacency[curr]) {
+                        if(!cameFrom.has(n) && !faceData[n].isSubmerged && faceData[n].steppedElevation < 0.8) {
+                            cameFrom.set(n, curr);
+                            q.push(n);
+                        }
+                    }
+                }
+                if(found) {
+                    let path = [];
+                    let curr = target;
+                    while(curr !== null) {
+                        path.push(curr);
+                        curr = cameFrom.get(curr);
+                    }
+                    path.reverse();
+                    roadPaths.push(path);
+                }
+            }
+        }
+    }
+
+    return { faceData, edgeMap, cloudFaces, cloudEdgeMaps, maxExtrusion, riverPaths, roadPaths };
+}
+
+function buildStripGeometry(pathsArr, width, raiseOffset, radius) {
+    const positions = [];
+    const addQuad = (l1, r1, r2, l2) => {
+        positions.push(
+            l1.x, l1.y, l1.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z,
+            r2.x, r2.y, r2.z, l2.x, l2.y, l2.z, l1.x, l1.y, l1.z
+        );
+    };
+    for (const path of pathsArr) {
+        if (path.length < 2) continue;
+        let pathData = [];
+        for (let i = 0; i < path.length; i++) {
+            let node = path[i];
+            let pos = node.pos.clone().normalize();
+            
+            let d_in = i > 0 ? pos.clone().sub(path[i-1].pos.clone().normalize()).normalize() : null;
+            let d_out = i < path.length - 1 ? path[i+1].pos.clone().normalize().sub(pos).normalize() : null;
+            
+            let tangent = new THREE.Vector3();
+            if (d_in && d_out) {
+                tangent.addVectors(d_in, d_out);
+                if (tangent.lengthSq() < 0.0001) tangent.copy(d_in);
+                tangent.normalize();
+            } else if (d_in) tangent.copy(d_in);
+            else if (d_out) tangent.copy(d_out);
+            else tangent.set(1, 0, 0);
+
+            let right = new THREE.Vector3().crossVectors(tangent, pos);
+            if (right.lengthSq() < 0.0001) right.set(0, 1, 0).cross(pos);
+            right.normalize();
+            
+            pathData.push({ pos, right, h: node.h });
+        }
+        
+        for (let i = 0; i < pathData.length - 1; i++) {
+            let pA = pathData[i], pB = pathData[i+1];
+            let radA = radius + pA.h + raiseOffset;
+            let radB = radius + pB.h + raiseOffset;
+            
+            let wA = pA.right.clone().multiplyScalar(width);
+            let wB = pB.right.clone().multiplyScalar(width);
+            
+            addQuad(
+                pA.pos.clone().multiplyScalar(radA).sub(wA),
+                pA.pos.clone().multiplyScalar(radA).add(wA),
+                pB.pos.clone().multiplyScalar(radB).add(wB),
+                pB.pos.clone().multiplyScalar(radB).sub(wB)
+            );
+        }
+    }
+    return positions;
 }
 
 function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
@@ -366,6 +440,7 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
     const decPositions = [];
     const cityBoxPositions = [];
     const cityPyrPositions = [];
+    const suburbBoxPositions = [];
     
     const prng = mulberry32(prngSeed !== null ? prngSeed + 777 : 12345);
 
@@ -414,24 +489,16 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
                 for (const [h1, h2, v1x, v1y, v1z, v2x, v2y, v2z, top1, top2] of iceEdges) {
                     const key = h1 < h2 ? h1 + '|' + h2 : h2 + '|' + h1;
                     const neighbors = tileData.edgeMap.get(key);
-
-                    const neighbor = neighbors
-                        ? tileData.faceData[neighbors[0] === fIdx ? neighbors[1] : neighbors[0]]
-                        : null;
-                    const needsSkirt = neighbor && neighbor.isSubmerged && !neighbor.isSeaIce;
-
-                    if (needsSkirt) {
+                    const neighbor = neighbors ? tileData.faceData[neighbors[0] === fIdx ? neighbors[1] : neighbors[0]] : null;
+                    
+                    if (neighbor && neighbor.isSubmerged && !neighbor.isSeaIce) {
                         const bot1 = new THREE.Vector3(v1x, v1y, v1z).normalize().multiplyScalar(skirtBot);
                         const bot2 = new THREE.Vector3(v2x, v2y, v2z).normalize().multiplyScalar(skirtBot);
 
                         for (let k = 0; k < 6; k++) seaIceSkirtColors.push(...skirtColor);
                         seaIceSkirtPositions.push(
-                            top1.x, top1.y, top1.z,
-                            top2.x, top2.y, top2.z,
-                            bot1.x, bot1.y, bot1.z,
-                            top2.x, top2.y, top2.z,
-                            bot2.x, bot2.y, bot2.z,
-                            bot1.x, bot1.y, bot1.z
+                            top1.x, top1.y, top1.z, top2.x, top2.y, top2.z, bot1.x, bot1.y, bot1.z,
+                            top2.x, top2.y, top2.z, bot2.x, bot2.y, bot2.z, bot1.x, bot1.y, bot1.z
                         );
                     }
                 }
@@ -444,7 +511,7 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
 
         if (!f.isSubmerged && !f.isLandIce && !isMoon) {
             if (f.isCity) {
-                let buildingCount = 10 + Math.floor(prng() * 8); 
+                let buildingCount = 8 + Math.floor(prng() * 8); 
                 for (let i = 0; i < buildingCount; i++) {
                     let r1 = prng(), r2 = prng();
                     if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
@@ -455,12 +522,22 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
                     
                     let scaleHeight = 0.8 + prng() * 3.5;
                     let rot = prng() * Math.PI;
+                    if (prng() > 0.3) cityBoxPositions.push(tx, ty, tz, scaleHeight, rot);
+                    else cityPyrPositions.push(tx, ty, tz, scaleHeight, rot);
+                }
+            } else if (f.isSuburb) {
+                let buildingCount = 3 + Math.floor(prng() * 4); 
+                for (let i = 0; i < buildingCount; i++) {
+                    let r1 = prng(), r2 = prng();
+                    if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+                    let r3 = 1 - r1 - r2;
+                    let tx = _eA.x * r1 + _eB.x * r2 + _eC.x * r3;
+                    let ty = _eA.y * r1 + _eB.y * r2 + _eC.y * r3;
+                    let tz = _eA.z * r1 + _eB.z * r2 + _eC.z * r3;
                     
-                    if (prng() > 0.3) {
-                        cityBoxPositions.push(tx, ty, tz, scaleHeight, rot);
-                    } else {
-                        cityPyrPositions.push(tx, ty, tz, scaleHeight, rot);
-                    }
+                    let scaleHeight = 0.5 + prng() * 1.0; 
+                    let rot = prng() * Math.PI;
+                    suburbBoxPositions.push(tx, ty, tz, scaleHeight, rot);
                 }
             } else if (f.moisture > 0.35 && f.temp < 0.85) {
                 let treeDensity = (f.moisture - 0.35) * 6.0; 
@@ -483,7 +560,7 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
         }
 
         let targetPos, targetCol;
-        if (f.isCity) { targetPos = cityGroundPositions; targetCol = cityGroundColors; }
+        if (f.isCity || f.isSuburb) { targetPos = cityGroundPositions; targetCol = cityGroundColors; }
         else if (f.isLandIce) { targetPos = icePositions; targetCol = iceColors; }
         else { targetPos = mattePositions; targetCol = matteColors; }
 
@@ -512,104 +589,99 @@ function buildLandGeometry(tileData, radius, isMoon, prngSeed) {
                     _bot1.x, _bot1.y, _bot1.z, _bot2.x, _bot2.y, _bot2.z, t1x, t1y, t1z,
                     _bot2.x, _bot2.y, _bot2.z, t2x, t2y, t2z, t1x, t1y, t1z
                 );
-                for(let k=0; k<6; k++) targetCol.push(f.sr, f.sg, f.sb);
+                
+                let sColorBase = new THREE.Color(f.sr, f.sg, f.sb);
+                for(let k=0; k<6; k++) targetCol.push(sColorBase.r, sColorBase.g, sColorBase.b);
             }
         }
     }
     
-    // ─── Построение геометрии рек: фаски (quads) и водопады (pillars) ─────────
-    const riverPositions = [];
-    const riverWidth = radius * 0.0035; 
-    const riverRaise = tileData.maxExtrusion * 0.005;
-
-    // Сборка полигона русла (Quad) с соблюдением обхода для корректных нормалей
-    const addQuad = (l1, r1, r2, l2) => {
-        riverPositions.push(
-            l1.x, l1.y, l1.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z,
-            r2.x, r2.y, r2.z, l2.x, l2.y, l2.z, l1.x, l1.y, l1.z
-        );
-    };
-
-    for (const path of tileData.riverPaths) {
-        if (path.length < 2) continue;
-
-        const pathData = [];
-        for (let i = 0; i < path.length; i++) {
-            const vId = path[i];
-            const v = tileData.vertices[vId];
-            const pos = new THREE.Vector3(v.x, v.y, v.z).normalize();
-
-            let e_in = null, e_out = null;
-            if (i > 0) {
-                const prevId = path[i-1];
-                e_in = tileData.vEdges.get(prevId < vId ? `${prevId}_${vId}` : `${vId}_${prevId}`);
+    const getSharedEdgeMid = (f1, f2) => {
+        const p1 = [{x:f1.ax, y:f1.ay, z:f1.az}, {x:f1.bx, y:f1.by, z:f1.bz}, {x:f1.cx, y:f1.cy, z:f1.cz}];
+        const p2 = [{x:f2.ax, y:f2.ay, z:f2.az}, {x:f2.bx, y:f2.by, z:f2.bz}, {x:f2.cx, y:f2.cy, z:f2.cz}];
+        const isSame = (v1, v2) => Math.abs(v1.x-v2.x)<0.001 && Math.abs(v1.y-v2.y)<0.001 && Math.abs(v1.z-v2.z)<0.001;
+        let shared = [];
+        for(let v1 of p1) {
+            for(let v2 of p2) {
+                if(isSame(v1, v2)) shared.push(v1);
             }
-            if (i < path.length - 1) {
-                const nextId = path[i+1];
-                e_out = tileData.vEdges.get(vId < nextId ? `${vId}_${nextId}` : `${nextId}_${vId}`);
+        }
+        if(shared.length >= 2) {
+            return new THREE.Vector3((shared[0].x + shared[1].x)*0.5, (shared[0].y + shared[1].y)*0.5, (shared[0].z + shared[1].z)*0.5);
+        }
+        return null;
+    }
+
+    const riverPathsNodes = [];
+    if (tileData.riverPaths) {
+        for (let path of tileData.riverPaths) {
+            let nodes = [];
+            for (let i = 0; i < path.length; i++) {
+                let f = tileData.faceData[path[i]];
+                nodes.push({ pos: new THREE.Vector3(f.midX, f.midY, f.midZ), h: f.h });
+                if (i < path.length - 1) {
+                    let fNext = tileData.faceData[path[i+1]];
+                    let mid = getSharedEdgeMid(f, fNext);
+                    if (mid) nodes.push({ pos: mid, h: Math.max(f.h, fNext.h) });
+                }
             }
+            riverPathsNodes.push(nodes);
+        }
+    }
+    const riverPositions = buildStripGeometry(riverPathsNodes, radius * 0.0035, tileData.maxExtrusion * 0.005, radius);
 
-            const h_in = e_in ? e_in.h : (e_out ? e_out.h : v.minH);
-            const h_out = e_out ? e_out.h : h_in;
+    const roadPathsNodes = [];
+    const carData = []; 
 
-            let d_in = i > 0 ? pos.clone().sub(new THREE.Vector3(tileData.vertices[path[i-1]].x, tileData.vertices[path[i-1]].y, tileData.vertices[path[i-1]].z).normalize()).normalize() : null;
-            let d_out = i < path.length - 1 ? new THREE.Vector3(tileData.vertices[path[i+1]].x, tileData.vertices[path[i+1]].y, tileData.vertices[path[i+1]].z).normalize().sub(pos).normalize() : null;
-
-            let tangent = new THREE.Vector3();
-            if (d_in && d_out) tangent.addVectors(d_in, d_out).normalize();
-            else if (d_in) tangent.copy(d_in);
-            else if (d_out) tangent.copy(d_out);
-
-            const right = tangent.cross(pos).normalize();
-            pathData.push({ pos, right, h_in, h_out });
+    if (tileData.roadPaths) {
+        for (let path of tileData.roadPaths) {
+            let nodes = [];
+            for (let i = 0; i < path.length; i++) {
+                let f = tileData.faceData[path[i]];
+                nodes.push({ pos: new THREE.Vector3(f.midX, f.midY, f.midZ), h: f.h });
+                if (i < path.length - 1) {
+                    let fNext = tileData.faceData[path[i+1]];
+                    let mid = getSharedEdgeMid(f, fNext);
+                    if (mid) nodes.push({ pos: mid, h: Math.max(f.h, fNext.h) });
+                }
+            }
+            roadPathsNodes.push(nodes);
         }
 
-        for (let i = 0; i < pathData.length - 1; i++) {
-            const pA = pathData[i];
-            const pB = pathData[i+1];
-
-            const H_seg = pA.h_out;
-            const rad = radius + H_seg + riverRaise;
-
-            const wRightA = pA.right.clone().multiplyScalar(riverWidth);
-            const wRightB = pB.right.clone().multiplyScalar(riverWidth);
-
-            const lA = pA.pos.clone().multiplyScalar(rad).sub(wRightA);
-            const rA = pA.pos.clone().multiplyScalar(rad).add(wRightA);
-            
-            const lB = pB.pos.clone().multiplyScalar(rad).sub(wRightB);
-            const rB = pB.pos.clone().multiplyScalar(rad).add(wRightB);
-
-            // Поверхность русла (фаска на стыке двух тайлов)
-            addQuad(lA, rA, rB, lB);
-
-            // Вертикальный водопад "столбик" в случае перепада высот
-            if (i < pathData.length - 2) {
-                const pC = pathData[i+1];
-                if (pC.h_in > pC.h_out) {
-                    const radLow = radius + pC.h_out + riverRaise;
-                    const wRightLow = pC.right.clone().multiplyScalar(riverWidth);
-
-                    const lLow = pC.pos.clone().multiplyScalar(radLow).sub(wRightLow);
-                    const rLow = pC.pos.clone().multiplyScalar(radLow).add(wRightLow);
-                    
-                    // Формируем вертикальную плоскость, смотрящую по течению
-                    addQuad(lB, lLow, rLow, rB);
+        for (let path of roadPathsNodes) {
+            for (let i = 0; i < path.length - 1; i++) {
+                let pA = path[i].pos.clone().normalize().multiplyScalar(radius + path[i].h + tileData.maxExtrusion * 0.015);
+                let pB = path[i+1].pos.clone().normalize().multiplyScalar(radius + path[i+1].h + tileData.maxExtrusion * 0.015);
+                
+                let dist = pA.distanceTo(pB);
+                let numCars = Math.floor(dist / 40) + (prng() < (dist/40 % 1) ? 1 : 0);
+                
+                for(let c = 0; c < numCars; c++) {
+                    carData.push({
+                        pA, pB, dist,
+                        offset: prng(),
+                        speed: (0.1 + prng() * 0.05) * (prng() > 0.5 ? 1 : -1)
+                    });
                 }
             }
         }
     }
+    const roadPositions = buildStripGeometry(roadPathsNodes, radius * 0.0025, tileData.maxExtrusion * 0.015, radius);
 
     return { 
-        matte: { pos: mattePositions, col: matteColors }, 
-        ice: { pos: icePositions, col: iceColors }, 
-        cityGround: { pos: cityGroundPositions, col: cityGroundColors },
-        water: { pos: waterPositions, col: waterColors, isFrozen: waterIsFrozen },
-        seaIce: { pos: seaIcePositions, col: seaIceColors },
-        seaIceSkirt: { pos: seaIceSkirtPositions, col: seaIceSkirtColors },
+        matte: buildGeo(mattePositions, matteColors, false), 
+        ice: buildGeo(icePositions, iceColors, false), 
+        cityGround: buildGeo(cityGroundPositions, cityGroundColors, false), 
+        water: buildGeo(waterPositions, waterColors, true, 'aFrozen', waterIsFrozen),
+        seaIce: buildGeo(seaIcePositions, seaIceColors, true),
+        seaIceSkirt: buildGeo(seaIceSkirtPositions, seaIceSkirtColors, false),
         trees: { pine: pinePositions, deciduous: decPositions },
         buildings: { boxes: cityBoxPositions, pyramids: cityPyrPositions },
-        rivers: { pos: riverPositions } 
+        suburbs: { boxes: suburbBoxPositions },
+        rivers: buildGeo(riverPositions, null, false),
+        roads: buildGeo(roadPositions, null, false),
+        cars: carData,
+        cloudsByZone: buildCloudData(tileData.cloudFaces, tileData.cloudEdgeMaps)
     };
 }
 
@@ -703,7 +775,7 @@ function buildCloudData(cloudFaces, cloudEdgeMaps) {
 }
 
 const buildGeo = (posArr, colArr, isSphericalNormal = false, extraAttribName = null, extraAttribData = null) => {
-    if (posArr.length === 0) return null;
+    if (posArr === null || posArr.length === 0) return null;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
     if (colArr) geo.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
@@ -729,19 +801,21 @@ export function buildProceduralGeometry(radius, detail, prngSeed, isMoon, genPar
     
     const tileData = computeTileData(baseGeo, noiseGens, radius, isMoon, genParams);
     const landData = buildLandGeometry(tileData, radius, isMoon, prngSeed);
-    const cloudsByZone = buildCloudData(tileData.cloudFaces, tileData.cloudEdgeMaps);
 
     return { 
-        matte: buildGeo(landData.matte.pos, landData.matte.col, false), 
-        ice: buildGeo(landData.ice.pos, landData.ice.col, false), 
-        cityGround: buildGeo(landData.cityGround.pos, landData.cityGround.col, false), 
-        water: buildGeo(landData.water.pos, landData.water.col, true, 'aFrozen', landData.water.isFrozen),
-        seaIce: buildGeo(landData.seaIce.pos, landData.seaIce.col, true),
-        seaIceSkirt: buildGeo(landData.seaIceSkirt.pos, landData.seaIceSkirt.col, false),
+        matte: landData.matte, 
+        ice: landData.ice, 
+        cityGround: landData.cityGround, 
+        water: landData.water,
+        seaIce: landData.seaIce,
+        seaIceSkirt: landData.seaIceSkirt,
         trees: landData.trees,
         buildings: landData.buildings,
-        rivers: buildGeo(landData.rivers.pos, null, false),
-        cloudsByZone
+        suburbs: landData.suburbs,
+        rivers: landData.rivers,
+        roads: landData.roads,
+        cars: landData.cars,
+        cloudsByZone: landData.cloudsByZone
     };
 }
 

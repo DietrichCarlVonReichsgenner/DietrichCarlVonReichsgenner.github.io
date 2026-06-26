@@ -80,6 +80,12 @@ export class MaterialFactory {
             ...offsetSettings
         });
 
+        this.planetRoad = new THREE.MeshStandardMaterial({
+            color: 0x555555, roughness: 0.9, metalness: 0.0,
+            depthWrite: false, side: THREE.DoubleSide,
+            ...offsetSettings
+        });
+
         this.planetWater = new THREE.MeshStandardMaterial({ 
             color: 0xffffff, vertexColors: true, transparent: true,        
             opacity: 0.75, roughness: 0.1, metalness: 0.6,           
@@ -87,6 +93,33 @@ export class MaterialFactory {
         });
 
         this.waterUniforms = { uTime: { value: 0 } };
+
+        this.planetRiver.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = this.waterUniforms.uTime;
+            shader.vertexShader = `
+                uniform float uTime;
+                varying vec3 vLocalPos;
+                ${shader.vertexShader}
+            `.replace(`#include <begin_vertex>`, `
+                #include <begin_vertex>
+                vLocalPos = position;
+                float wave = sin(position.x * 0.1 + uTime * 3.0) * cos(position.z * 0.1 + uTime * 3.0);
+                transformed += normalize(position) * wave * 1.5;
+            `);
+
+            shader.fragmentShader = `
+                uniform float uTime;
+                varying vec3 vLocalPos;
+                ${shader.fragmentShader}
+            `.replace(`#include <normal_fragment_begin>`, `
+                #include <normal_fragment_begin>
+                float t = uTime * 2.0;
+                vec3 p = vLocalPos * 0.1;
+                vec3 ripple = vec3(sin(p.y + t) * 0.1, cos(p.x - t) * 0.1, sin(p.z + t) * 0.1);
+                if (!gl_FrontFacing) ripple = -ripple;
+                normal = normalize(normal + ripple);
+            `);
+        };
 
         this.planetWater.onBeforeCompile = (shader) => {
             shader.uniforms.uTime = this.waterUniforms.uTime;
@@ -159,6 +192,65 @@ export class MaterialFactory {
         this.moonWire = new THREE.MeshBasicMaterial({ wireframe: true, color: 0xaaaaaa, transparent: true, opacity: 0.2 });
         this.moonSolid = new THREE.MeshStandardMaterial({ color: matCfg.moon?.color || 0xffffff, flatShading: true, vertexColors: true, ...offsetSettings });
         this.starsMaterial = new THREE.PointsMaterial({ size: 1.5, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.9 });
+
+        this.cityMaterial = new THREE.MeshStandardMaterial(CONFIG.graphics.materials.city);
+        this.cityGroundMaterial = new THREE.MeshStandardMaterial(CONFIG.graphics.materials.cityGround);
+        this.cityGroundMaterial.vertexColors = true; 
+
+        this.suburbMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x999999, roughness: 0.9, metalness: 0.1, 
+            emissive: 0xffdd88, emissiveIntensity: 0.6 
+        });
+
+        this.nightLightUniforms = { uSunPos: { value: new THREE.Vector3() } };
+        const injectNightLights = (shader) => {
+            shader.uniforms.uSunPos = this.nightLightUniforms.uSunPos;
+            shader.vertexShader = `varying vec3 vWorldPosOut;\n` + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <worldpos_vertex>',
+                `#include <worldpos_vertex>\n vWorldPosOut = worldPosition.xyz;`
+            );
+            shader.fragmentShader = `varying vec3 vWorldPosOut;\nuniform vec3 uSunPos;\n` + shader.fragmentShader;
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <emissivemap_fragment>',
+                `#include <emissivemap_fragment>
+                vec3 surfaceNormal = normalize(vWorldPosOut);
+                vec3 sunDir = normalize(uSunPos);
+                float nightMask = smoothstep(0.1, -0.2, dot(surfaceNormal, sunDir));
+                totalEmissiveRadiance *= nightMask;`
+            );
+        };
+        
+        this.cityMaterial.onBeforeCompile = injectNightLights;
+        this.suburbMaterial.onBeforeCompile = injectNightLights;
+
+        this.carMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff, roughness: 0.4, metalness: 0.6,
+            ...offsetSettings
+        });
+
+        this.carMaterial.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = this.waterUniforms.uTime;
+            shader.vertexShader = `
+                uniform float uTime;
+                attribute float aDistance;
+                attribute float aOffset;
+                attribute float aSpeed;
+                ${shader.vertexShader}
+            `.replace(`#include <begin_vertex>`, `
+                #include <begin_vertex>
+                float progress = fract(uTime * aSpeed + aOffset);
+                transformed.z -= progress * aDistance;
+            `);
+            shader.fragmentShader = shader.fragmentShader.replace(
+                `#include <emissivemap_fragment>`,
+                `#include <emissivemap_fragment>
+                #ifdef USE_INSTANCING
+                    totalEmissiveRadiance += vColor.rgb * 2.0; 
+                #endif
+                `
+            );
+        };
 
         this.weatherUniforms = {
             uTime: { value: 0 },

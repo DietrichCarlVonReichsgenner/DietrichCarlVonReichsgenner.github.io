@@ -1,4 +1,3 @@
-// UIManager.js
 import { CONFIG } from '../config.js';
 
 export class UIManager {
@@ -129,7 +128,6 @@ export class UIManager {
         }, CONFIG.generationDebounceMs);
     }
 
-    // Синхронизация значений стейта обратно в UI элементы после десериализации
     syncStateToUI() {
         const updateUI = (id, key, isP) => {
             const el = document.getElementById(id);
@@ -150,6 +148,7 @@ export class UIManager {
         updateUI('gen-elev', 'elevationSpread', false); 
         updateUI('gen-temp', 'globalTemp', false); 
         updateUI('gen-moist', 'globalMoisture', false);
+        updateUI('gen-river', 'riverCount', false); 
         updateUI('gen-c-std', 'cloudStandard', true); 
         updateUI('gen-c-rain', 'cloudRain', true); 
         updateUI('gen-c-cirrus', 'cloudCirrus', true);
@@ -187,11 +186,11 @@ export class UIManager {
         bindGenSlider('gen-elev', 'elevationSpread');
         bindGenSlider('gen-temp', 'globalTemp');
         bindGenSlider('gen-moist', 'globalMoisture');
+        bindGenSlider('gen-river', 'riverCount');
         bindGenSlider('gen-c-std', 'cloudStandard', true);
         bindGenSlider('gen-c-rain', 'cloudRain', true);
         bindGenSlider('gen-c-cirrus', 'cloudCirrus', true);
 
-        // Использование глобальной сериализации для JSON
         document.getElementById('btn-export')?.addEventListener('click', () => {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(this.engine.serialize());
             const dl = document.createElement('a');
@@ -200,7 +199,6 @@ export class UIManager {
             dl.click();
         });
 
-        // Быстрые сохранения в localStorage
         document.getElementById('btn-save')?.addEventListener('click', () => {
             localStorage.setItem('geoscape_quicksave', this.engine.serialize());
             this.logToConsole('[SYS] Быстрое сохранение выполнено в LocalStorage.', 'log-sys');
@@ -222,7 +220,6 @@ export class UIManager {
             const reader = new FileReader();
             reader.onload = (event) => {
                 this.engine.deserialize(event.target.result);
-                // Сброс input, чтобы можно было загрузить тот же файл снова
                 e.target.value = ''; 
             };
             reader.readAsText(file);

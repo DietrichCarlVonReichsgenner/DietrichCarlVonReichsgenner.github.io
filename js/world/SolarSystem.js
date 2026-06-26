@@ -41,6 +41,8 @@ export class SolarSystem {
         this.allAtmosMeshes = [];
         this.allTreeMeshes = [];
         this.allCityMeshes = [];
+        this.allSuburbMeshes = [];
+        this.allRoadMeshes = [];
         this.cloudMeshes = { tropics: {}, temperate: {}, polar: {} };
         
         this.planetLOD = null;
@@ -65,35 +67,6 @@ export class SolarSystem {
         pyrGeo.translate(0, 0.5, 0);
 
         this.sharedGeos = { pine: pineGeo, dec: decGeo, box: boxGeo, pyr: pyrGeo };
-
-        this.nightLightUniforms = { uSunPos: { value: new THREE.Vector3() } };
-
-        const injectNightLights = (shader) => {
-            shader.uniforms.uSunPos = this.nightLightUniforms.uSunPos;
-            
-            shader.vertexShader = `varying vec3 vWorldPosOut;\n` + shader.vertexShader;
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <worldpos_vertex>',
-                `#include <worldpos_vertex>\n vWorldPosOut = worldPosition.xyz;`
-            );
-
-            shader.fragmentShader = `varying vec3 vWorldPosOut;\nuniform vec3 uSunPos;\n` + shader.fragmentShader;
-            
-            shader.fragmentShader = shader.fragmentShader.replace(
-                '#include <emissivemap_fragment>',
-                `#include <emissivemap_fragment>
-                vec3 surfaceNormal = normalize(vWorldPosOut);
-                vec3 sunDir = normalize(uSunPos);
-                float nightMask = smoothstep(0.1, -0.2, dot(surfaceNormal, sunDir));
-                totalEmissiveRadiance *= nightMask;`
-            );
-        };
-
-        this.cityMaterial = new THREE.MeshStandardMaterial(CONFIG.graphics.materials.city);
-        this.cityMaterial.onBeforeCompile = injectNightLights;
-
-        this.cityGroundMaterial = new THREE.MeshStandardMaterial(CONFIG.graphics.materials.cityGround);
-        this.cityGroundMaterial.vertexColors = true; 
 
         this.createStars();
         
@@ -177,6 +150,8 @@ export class SolarSystem {
         this.allAtmosMeshes.forEach(disposeGeometry);
         this.allTreeMeshes.forEach(disposeGeometry);
         this.allCityMeshes.forEach(disposeGeometry);
+        this.allSuburbMeshes.forEach(disposeGeometry);
+        this.allRoadMeshes.forEach(disposeGeometry);
         
         for (let zone of ['tropics', 'temperate', 'polar']) {
             for (let type of ['cumulus', 'rain', 'cirrus']) {
@@ -212,6 +187,8 @@ export class SolarSystem {
         this.allAtmosMeshes = [];
         this.allTreeMeshes = [];
         this.allCityMeshes = [];
+        this.allSuburbMeshes = [];
+        this.allRoadMeshes = [];
         this.cloudMeshes = { tropics: {}, temperate: {}, polar: {} };
         this.planetLOD = null;
         this.cloudLODTropics = null;
@@ -244,7 +221,7 @@ export class SolarSystem {
                 this.allSolidMeshes.push(mesh); this.allWireMeshes.push(wire); group.add(mesh, wire);
             }
             if (geoData.cityGround) {
-                const mesh = new THREE.Mesh(geoData.cityGround, this.cityGroundMaterial);
+                const mesh = new THREE.Mesh(geoData.cityGround, this.materials.cityGroundMaterial);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 this.allSolidMeshes.push(mesh); 
@@ -269,7 +246,6 @@ export class SolarSystem {
                 skirtMesh.renderOrder = 1;
                 skirtMesh.castShadow = true;
                 skirtMesh.receiveShadow = true;
-                // Кромка льда скрывается по чекбоксу
                 this.allSolidMeshes.push(skirtMesh);
                 group.add(skirtMesh);
             }
@@ -321,19 +297,85 @@ export class SolarSystem {
             }
 
             if (geoData.buildings) {
-                const boxMesh = createInstancedProps(geoData.buildings.boxes, this.sharedGeos.box, this.cityMaterial, 20.0, true);
+                const boxMesh = createInstancedProps(geoData.buildings.boxes, this.sharedGeos.box, this.materials.cityMaterial, 20.0, true);
                 if (boxMesh) { this.allCityMeshes.push(boxMesh); group.add(boxMesh); }
                 
-                const pyrMesh = createInstancedProps(geoData.buildings.pyramids, this.sharedGeos.pyr, this.cityMaterial, 20.0, true);
+                const pyrMesh = createInstancedProps(geoData.buildings.pyramids, this.sharedGeos.pyr, this.materials.cityMaterial, 20.0, true);
                 if (pyrMesh) { this.allCityMeshes.push(pyrMesh); group.add(pyrMesh); }
+            }
+
+            if (geoData.suburbs) {
+                const suburbMesh = createInstancedProps(geoData.suburbs.boxes, this.sharedGeos.box, this.materials.suburbMaterial, 20.0, true);
+                if (suburbMesh) { this.allSuburbMeshes.push(suburbMesh); group.add(suburbMesh); }
             }
 
             if (geoData.rivers) {
                 const mesh = new THREE.Mesh(geoData.rivers, this.materials.planetRiver);
                 mesh.receiveShadow = true;
-                // Реки скрываются по чекбоксу Solid, но игнорируются Raycaster-ом (нет в _surfaceTargets)
                 this.allSolidMeshes.push(mesh);
                 group.add(mesh);
+            }
+
+            if (geoData.roads) {
+                const mesh = new THREE.Mesh(geoData.roads, this.materials.planetRoad);
+                mesh.receiveShadow = true;
+                this.allRoadMeshes.push(mesh);
+                group.add(mesh);
+            }
+
+            // --- Генерация машинок (Traffic) ---
+            if (geoData.cars && geoData.cars.length > 0) {
+                const count = geoData.cars.length;
+                const carGeo = new THREE.BoxGeometry(1.5, 1.5, 3.0);
+                carGeo.translate(0, 0.75, 0); 
+                const im = new THREE.InstancedMesh(carGeo, this.materials.carMaterial, count);
+
+                const aDistance = new Float32Array(count);
+                const aOffset = new Float32Array(count);
+                const aSpeed = new Float32Array(count);
+
+                const m = new THREE.Matrix4();
+                const right = new THREE.Vector3();
+                const up = new THREE.Vector3();
+                const forward = new THREE.Vector3();
+
+                const cObj = new THREE.Color();
+
+                for (let i = 0; i < count; i++) {
+                    const c = geoData.cars[i];
+                    let startP = c.speed > 0 ? c.pA : c.pB;
+                    let endP = c.speed > 0 ? c.pB : c.pA;
+                    
+                    up.copy(startP).normalize();
+                    forward.subVectors(endP, startP).normalize();
+                    right.crossVectors(forward, up).normalize();
+                    const orthoUp = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+                    // Локальная ось Z смотрит вперед:
+                    m.makeBasis(right, orthoUp, forward.clone().negate());
+                    
+                    // Смещение на нужную (правую) полосу движения
+                    const laneOffset = right.clone().multiplyScalar(2.0);
+                    m.setPosition(startP.clone().add(laneOffset));
+
+                    im.setMatrixAt(i, m);
+
+                    aDistance[i] = c.dist;
+                    aOffset[i] = c.offset;
+                    aSpeed[i] = Math.abs(c.speed);
+
+                    cObj.setHSL(Math.random(), 0.7, 0.5 + Math.random() * 0.4);
+                    im.setColorAt(i, cObj);
+                }
+
+                carGeo.setAttribute('aDistance', new THREE.InstancedBufferAttribute(aDistance, 1));
+                carGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(aOffset, 1));
+                carGeo.setAttribute('aSpeed', new THREE.InstancedBufferAttribute(aSpeed, 1));
+
+                im.receiveShadow = true;
+                im.castShadow = true;
+                this.allCityMeshes.push(im); 
+                group.add(im);
             }
 
             if (atmosMat && level.atmosDetail !== undefined) {
@@ -521,6 +563,8 @@ export class SolarSystem {
         this.allSolidMeshes.forEach(m => m.visible = solid);
         this.allTreeMeshes.forEach(m => m.visible = solid);
         this.allCityMeshes.forEach(m => m.visible = solid);
+        this.allSuburbMeshes.forEach(m => m.visible = solid);
+        this.allRoadMeshes.forEach(m => m.visible = solid);
         this.allWireMeshes.forEach(m => m.visible = wire);
         this.allAtmosMeshes.forEach(m => m.visible = atmos);
 
@@ -570,6 +614,6 @@ export class SolarSystem {
         
         this.updateLightTargets(camera.position);
 
-        this.nightLightUniforms.uSunPos.value.copy(this.sunGroup.position);
+        this.materials.nightLightUniforms.uSunPos.value.copy(this.sunGroup.position);
     }
 }

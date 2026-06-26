@@ -11,10 +11,6 @@ import { SelectionController } from './game/SelectionController.js';
 import { EventEmitter } from './utils/EventEmitter.js';
 import { BODY_TYPES } from './world/BodyRegistry.js';
 
-// ─── SaveSystem ───────────────────────────────────────────────────────────────
-// Отвечает исключительно за сериализацию/десериализацию состояния игры.
-// Не знает о рендеринге, физике или UI-разметке.
-
 class SaveSystem {
     constructor(engine) {
         this.engine = engine;
@@ -65,10 +61,6 @@ class SaveSystem {
         }
     }
 }
-
-// ─── CommandSystem ────────────────────────────────────────────────────────────
-// Разбирает строки команд и делегирует выполнение engine/подсистемам.
-// GameEngine не содержит switch-логику напрямую.
 
 class CommandSystem {
     constructor(engine) {
@@ -189,11 +181,6 @@ class CommandSystem {
     }
 }
 
-// ─── GameEngine ───────────────────────────────────────────────────────────────
-// Отвечает за: инициализацию подсистем, анимационный цикл, LOD-менеджмент,
-// управление камерой и генерацию мира.
-// Сериализация делегирована SaveSystem, команды — CommandSystem.
-
 class GameEngine {
     constructor() {
         this.events = new EventEmitter();
@@ -212,7 +199,8 @@ class GameEngine {
             cloudStandard:    CONFIG.generation.cloudStandard,
             cloudRain:        CONFIG.generation.cloudRain,
             cloudCirrus:      CONFIG.generation.cloudCirrus,
-            cityCount:        CONFIG.generation.cityCount
+            cityCount:        CONFIG.generation.cityCount,
+            riverCount:       CONFIG.generation.riverCount
         };
 
         this.clock        = new THREE.Clock();
@@ -237,8 +225,9 @@ class GameEngine {
         this.saveSystem       = new SaveSystem(this);
         this.commandSystem    = new CommandSystem(this);
 
+        // Уменьшена модель игрока до 2x2x2
         const playerMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(20, 20, 20),
+            new THREE.BoxGeometry(2, 2, 2),
             new THREE.MeshStandardMaterial({
                 color: 0xff0000, roughness: 0.3, metalness: 0.8,
                 emissive: 0xaa0000, emissiveIntensity: 0.8
@@ -271,13 +260,9 @@ class GameEngine {
         this.animate();
     }
 
-    // ─── Публичные делегаты (сохраняют внешний API) ───────────────────────────
-
     serialize()              { return this.saveSystem.serialize(); }
     deserialize(json)        { return this.saveSystem.deserialize(json); }
     executeCommand(cmdStr)   { this.commandSystem.execute(cmdStr); }
-
-    // ─── Спавн игрока ─────────────────────────────────────────────────────────
 
     spawnPlayerAtHighestPoint() {
         let maxElev = 0;
@@ -320,8 +305,6 @@ class GameEngine {
         this.ui.logToConsole('[SYS] Игрок десантирован на координатах высочайшего пика.', 'log-sys');
     }
 
-    // ─── Кэш поверхностей ─────────────────────────────────────────────────────
-
     updateSurfaceTargetsCache() {
         this._surfaceTargets = this.solarSystem.allSolidMeshes.filter(m => {
             const isVisible = m.visible && m.parent?.visible;
@@ -336,8 +319,6 @@ class GameEngine {
             m => m.material !== this.materials.planetWater
         );
     }
-
-    // ─── Генерация мира ───────────────────────────────────────────────────────
 
     async generateSystem() {
         if (this._generationPromise && this.abortController) {
@@ -386,8 +367,6 @@ class GameEngine {
         return this._generationPromise;
     }
 
-    // ─── Камера ───────────────────────────────────────────────────────────────
-
     setCameraFocus(mode) {
         const off = CONFIG.camera.focusOffsets;
         const camCfg = CONFIG.physics.camera;
@@ -416,8 +395,6 @@ class GameEngine {
         }
     }
 
-    // ─── Анимационный цикл ────────────────────────────────────────────────────
-
     animate() {
         requestAnimationFrame(() => this.animate());
         const delta    = this.clock.getDelta();
@@ -426,7 +403,6 @@ class GameEngine {
         this.ecs.update(delta);
         this.materials.updateTime(this.clock.getElapsedTime());
 
-        // Орбиты
         this.angleSun += CONFIG.physics.orbitSpeedSun * simDelta;
         this.solarSystem.sunGroup.position.set(
             Math.cos(this.angleSun) * CONFIG.physics.orbitRadiusSun,
@@ -450,7 +426,6 @@ class GameEngine {
 
         this.solarSystem.update(simDelta, this.camera, this.playerEntity.Transform.position, this.state);
 
-        // LOD-отслеживание
         const pLevel = this.solarSystem.planetLOD?.getCurrentLevel() ?? -1;
         const mLevel = this.solarSystem.moonLOD?.getCurrentLevel()   ?? -1;
         const sLevel = this.solarSystem.sunLOD?.getCurrentLevel()    ?? -1;
@@ -469,7 +444,6 @@ class GameEngine {
                 this.selectionController.updateHighlight();
         }
 
-        // Следование камеры
         const currentTargetPosition = new THREE.Vector3();
         const mode = this.cameraController.mode;
         if (mode === 'sun') {
@@ -485,7 +459,6 @@ class GameEngine {
         this.cameraController.updateTracking(currentTargetPosition, this.playerEntity, this.state);
         this.renderer.render();
 
-        // FPS-счётчик
         this.frameCount++;
         const now = performance.now();
         if (now - this.lastFpsTime >= 500) {

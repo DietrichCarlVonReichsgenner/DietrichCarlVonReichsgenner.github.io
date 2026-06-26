@@ -15,7 +15,7 @@ export const CONFIG = {
         cloudRain: 0.3,
         cloudCirrus: 0.4,
         cityCount: 15,          
-        riverCount: 10,         
+        riverCount: 40,         
         maxExtrusionPlanet: 0.08,
         maxExtrusionMoon: 0.04,
         waterLevelThreshold: 0.4,
@@ -66,7 +66,7 @@ export const CONFIG = {
             water: { color: 0xffffff, roughness: 0.3, metalness: 0.0, transmission: 0.6, ior: 1.333, opacity: 0.8 },
             moon:  { color: 0xffffff, roughness: 1.0, metalness: 0.0 },
             city:       { color: 0x777777, roughness: 0.9, metalness: 0.2, emissive: 0xffaa00, emissiveIntensity: 1.2 },
-            cityGround: { color: 0x666666, roughness: 1.0, metalness: 0.0 }, // Убрано свечение
+            cityGround: { color: 0x666666, roughness: 1.0, metalness: 0.0 },
             cloud: {
                 cumulus: { color: 0xffffff, roughness: 0.7, metalness: 0.0, opacity: 0.70 },
                 rain:    { color: 0x888888, roughness: 0.85, metalness: 0.0, opacity: 0.85 },
@@ -94,28 +94,28 @@ export const CONFIG = {
             stepHeight: 35.0,
             waterDrag: 0.85,
             waterBuoyancy: 300.0,
-            groundCheckDistance: 25.0,
-            collisionRadius: 18.0
+            groundCheckDistance: 10.0,
+            collisionRadius: 4.5
         },
 
         vehicle: {
-            collisionRadius: 15.0,       // Радиус коллизии корпуса корабля
-            boardingRadius: 150.0,       // Расстояние посадки в кабину
-            groundFriction: 0.8,         // Трение о рельеф при приземлении
-            waterFriction: 0.95,         // Гидродинамическое сопротивление
-            atmosphericDrag: 0.98,       // Аэродинамическое сопротивление
-            thrustAcceleration: 8000.0,  // Дельта тяги за секунду
-            maxThrust: 15000.0,          // Максимальная тяга
-            pitchRate: 2.0,              // Скорость тангажа (рад/с)
-            yawRate: 2.0,                // Скорость рысканья (рад/с)
-            rollRate: 3.0                // Скорость крена (рад/с)
+            collisionRadius: 15.0,       
+            boardingRadius: 150.0,       
+            groundFriction: 0.8,         
+            waterFriction: 0.95,         
+            atmosphericDrag: 0.98,       
+            thrustAcceleration: 8000.0,  
+            maxThrust: 15000.0,          
+            pitchRate: 2.0,              
+            yawRate: 2.0,                
+            rollRate: 3.0                
         },
 
-        spawnDropHeight: 2000.0,         // Высота десантирования над пиком
+        spawnDropHeight: 2000.0,         
 
         camera: {
-            playerFollowUp: 100.0,       // Смещение камеры вверх от игрока
-            playerFollowBack: 200.0      // Смещение камеры назад от игрока
+            playerFollowUp: 30.0,       
+            playerFollowBack: 60.0      
         }
     },
     
